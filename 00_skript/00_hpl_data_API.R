@@ -80,6 +80,18 @@ td2 = gsub("\\\\", "/", td)
 tatort <- readOGR(paste0(td2, "/To2018_Swe99TM.shp"), stringsAsFactors = FALSE, verbose = FALSE, encoding = "UTF-8")
 unlink(td)
 
+
+# några av SCB tätorter är del av ULs stadstrafik och bör kategoriseras som Uppsala tätort
+# Ultuna = T0654
+# Sävja = T0632
+# Håga = T0566
+
+omkateg = c("T0654", "T0632", "T0566")  
+
+tatort@data = tatort@data %>% 
+  mutate(TATORT = ifelse(TATORTSKOD %in% omkateg, "Uppsala", TATORT))
+
+
 # merge hpl coordinates with shapefiles 
 hpl_kommun <- data.frame(coordinates(UnikKoordinat_sweref),
                          extract(kommun, UnikKoordinat_sweref))
