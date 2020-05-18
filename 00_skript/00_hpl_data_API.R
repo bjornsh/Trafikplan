@@ -6,6 +6,9 @@ library(sp)
 library(rgdal)
 library(raster)
 
+rm(list = ls())
+invisible(gc())
+
 `%notin%` <- Negate(`%in%`)
 
 #### import API hpl data ####
@@ -26,26 +29,30 @@ colnames(alla_linjer) = c("linje", "hpl_id", "hpl_namn", "area", "lat", "long")
 
 LinjeExklud = c("990", "982", "984", "986", "988") # exkludera linjer som är sjukresebuss eller färja
 
+
 HplIdKoordinat = alla_linjer %>% 
   filter(linje %notin% LinjeExklud) %>%
   dplyr::select(hpl_id, lat, long) %>% 
-  distinct()
-
+  arrange(hpl_id) %>%
+  group_by(hpl_id) %>%
+  filter(row_number()==1) # unik hpl ID
+  
 AllaLinjerPerHplID = alla_linjer %>% 
   dplyr::select(linje, hpl_id) %>% 
+  mutate(hpl_id = as.character(hpl_id)) %>%
   distinct() %>% # tex linje 2 har 700600 två gånger
   group_by(hpl_id) %>% 
-  summarise(AllaLinjer = paste(linje, collapse = "_"))
+  dplyr::summarise(AllaLinjer = paste(linje, collapse = "_"))
+
 
 write.csv2(HplIdKoordinat, paste0("01_input_data/HplIdKoordinat_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 write.csv2(AllaLinjerPerHplID, paste0("01_input_data/AllaLinjerPerHplID_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 
 
-
 ### matcha hpl med shapefil ####
-
 # Konvertera API hållplats koordinater från WGS84 till SWEREF (för att merge med shapefiler) 
-UnikKoordinat = HplIdKoordinat %>% 
+UnikKoordinat = HplIdKoordinat %>%
+  ungroup() %>%
   dplyr::select(lat, long)
 
 UnikKoordinatKOPIA = UnikKoordinat
@@ -58,7 +65,6 @@ coordinates(UnikKoordinat) = ~long+lat
 proj4string(UnikKoordinat) = CRS("+init=epsg:4326")
 UnikKoordinat_sweref <- as_data_frame(spTransform(UnikKoordinat, CRS(SWEREF99TM)))
 
-
 # load shapefiles
 # SCG tätort shapefil är mer akkurat än landmäteriets, dvs det ingår bara ytan där det finns befolkning. 
 # Lantmäteriet använder en buffer. Dessutom följer 2018 befolkningsdata med i shapefilen
@@ -67,7 +73,7 @@ kommun=readOGR("01_input_data/shp/ak_riks.shp",
                stringsAsFactors = FALSE, verbose = FALSE, encoding = "UTF-8")
 
 
-# ladda ner, unzip och importera shp till R
+# ladda ner, unzip och importera tätort shp till R
 td = tempdir()
 tf = tempfile(tmpdir=td, fileext=".zip")
 
@@ -82,21 +88,18 @@ unlink(td)
 
 
 # några av SCB tätorter är del av ULs stadstrafik och bör kategoriseras som Uppsala tätort
-# Ultuna = T0654
-# Sävja = T0632
-# Håga = T0566
-
+# Ultuna = T0654; Sävja = T0632; Håga = T0566
 omkateg = c("T0654", "T0632", "T0566")  
 
 tatort@data = tatort@data %>% 
   mutate(TATORT = ifelse(TATORTSKOD %in% omkateg, "Uppsala", TATORT))
 
-
 # merge hpl coordinates with shapefiles 
 hpl_kommun <- data.frame(coordinates(UnikKoordinat_sweref),
-                         extract(kommun, UnikKoordinat_sweref))
+                         raster::extract(kommun, UnikKoordinat_sweref))
 hpl_tatort <- data.frame(coordinates(UnikKoordinat_sweref),
-                         extract(tatort, UnikKoordinat_sweref))
+                         raster::extract(tatort, UnikKoordinat_sweref))
+
 
 # append files: alla hpl med all meta data
 hpl_meta = cbind(HplIdKoordinat, 
@@ -105,6 +108,14 @@ hpl_meta = cbind(HplIdKoordinat,
 
 colnames(hpl_meta) = c("HplID", "Hpl_Wgs84North", "Hpl_Wgs84East", "Hpl_SwerefEast", "Hpl_SwerefNorth", "KommunNamn", "LanNamn", "TatortKod",
                        "TatortNamn", "Befolkning2018") # "DesoID", "RutID", 
+
+
+# Bålsta buss och tåg station ligger utanför tätorten och fick inget tätortnamn: raster::extract()
+hpl_meta = hpl_meta %>%
+  as.data.frame() %>%
+  mutate(TatortNamn = if_else(HplID == "705003" | HplID == "105112", "Bålsta", TatortNamn),
+         TatortKod = ifelse(HplID == "705003" | HplID == "105112", "T0520", TatortKod),
+         Befolkning2018 = ifelse(HplID == "705003" | HplID == "105112", "15210", Befolkning2018))
 
 storregional = c("Stockholm", "Gävle", "Uppsala", "Västerås")
 
@@ -122,6 +133,5 @@ hpl_meta = hpl_meta %>%
 # det krävs datum i filnamn eftersom API data reflektera idags tidtabell
 write.csv2(hpl_meta, paste0("01_input_data/HplData_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 
-# hpl_meta = read.csv2("01_input_data/HplData_2020-05-13.csv")
 
 
