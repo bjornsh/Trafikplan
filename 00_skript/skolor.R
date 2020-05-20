@@ -18,12 +18,16 @@ library(rgdal)
 library(rgeos)
 library(raster)
 library(spatialEco)
+library(jsonlite)
+library(stringr)
 
 
 rm(list = ls())
 invisible(gc())
 
 `%notin%` <- Negate(`%in%`)
+
+hpl = read.csv2("01_input_data/AllaLinjerPerHplID_2020-05-19.csv")
 
 skol=readOGR("01_input_data/shp/skolor/Buffer_of_Skolor_20200518.shp", 
              stringsAsFactors = FALSE, verbose = FALSE, encoding = "UTF-8")
@@ -114,7 +118,7 @@ MinAntalHplOvrigTatort = OvrigTatort1 %>%
 
 
 #### Minska antal hpl som ingår i API skriptet ####
-hpl = read.csv2("01_input_data/AllaLinjerPerHplID_2020-05-19.csv")
+
 
 # ett antal hpl inom samma buffer trafikeras av exakt samma linjer
 HplInomSkolBuffer %>% 
@@ -139,8 +143,6 @@ HplInomSkolBuffer %>%
 MinAntalHplInomSkolBuffer = HplInomSkolBuffer %>% 
   left_join(., hpl, by = c("HplID" = "hpl_id")) %>% 
   dplyr::select(Namn, AllaLinjer, HplID) %>%
-#  distinct(Namn, AllaLinjer, .keep_all = TRUE) %>%
-#  filter(Namn == "Sjogrenska gymnasiet" | Namn == "Westerlundska gymnasiet") %>%
   separate_rows(., AllaLinjer, convert = TRUE) %>%
   distinct(Namn, AllaLinjer, .keep_all = TRUE) %>%
   distinct(Namn, HplID) 
@@ -156,7 +158,178 @@ TatortSkolHpl = merge(MinAntalHplOvrigTatort[,"HplID"], MinAntalHplInomSkolBuffe
 colnames(TatortSkolHpl) = c("HplIDTatort", "HplIDSkol")
 
 
+### API ####
 
+# definera morgon och kväll rusningstider
+fm_rusning = c("06", "07", "08") # från tätort till skolan
+em_rusning = c("15", "16", "17", "18") # från skolan till tätort
+timekort = c("06", "07", "08", "15", "16", "17", "18")
+
+
+#### välj test ellr full körning
+# df = TatortSkolHpl[c(1,20,30, 40,50,100,200),] # test run, ta bort för full körning
+df = TatortSkolHpl # full run
+
+# test run
+# time = c("06:00:00", "15:00:00")
+
+# full run
+time = c("06:00:00", "07:00:00", "08:00:00", "15:00:00", "16:00:00", "17:00:00", "18:00:00")
+
+dateVardag = "2020-05-25"
+dateHelg = "2020-05-30"
+date = c("2020-05-25", "2020-05-30")
+
+n = length(time)
+df1 = do.call("rbind", replicate(n, df, simplify = FALSE))
+
+timereplokal = rep(time, each=length(start))
+daterep = rep(date, each=length(timereplokal))
+
+df2 = data.frame(df1, dateVardag, timereplokal)
+colnames(df2) = c("HplIDTatort", "HplIDSkol", "Datum", "timereplokal")
+
+# skapa df för fm- och em-rusningstider där start och stop hpl byter plats mellan fm och em
+df3 = df2 %>% 
+  filter(substr(timereplokal,1, 2) %in% em_rusning) %>%
+  rename(HplIDTatort = HplIDSkol, HplIDSkol = HplIDTatort) %>%
+  bind_rows(., df2[substr(df2$timereplokal,1, 2) %in% fm_rusning,]) %>%
+  rename(StartHplID = HplIDSkol, StopHplID = HplIDTatort)
+
+# lägg till samma rader med byt datum (helg)
+df4 = df3 %>%
+  mutate(Datum = gsub(dateVardag, dateHelg, Datum)) %>%
+  bind_rows(., df3)
+
+
+# API tolka tider som UTC, därför omvandlas lokatid här till UTC
+df4 = df4 %>% 
+  mutate(DateTimeLokal = as.POSIXct(paste(Datum, timereplokal), tz="Europe/Berlin"),
+         DateTimeUTC = format(DateTimeLokal, tz="UTC",usetz=TRUE))
+
+# skapa url för varje resa
+df4$url = paste0("https://api.ul.se/api/v4/journeys?",
+                 "fromPointId=",df4$StartHplID,"&fromPointType=","0",
+                 "&toPointId=", df4$StopHplID,"&toPointType=","0",
+                 "&dateTime=", substr(df4$DateTimeUTC, 1, 10),"T",substr(df4$DateTimeUTC, 12, 19), "Z",
+                 "&directionType=", "0",
+                 "&trafficTypes=","1,2,3,4,5,6,7,8,9,10,11")
+
+
+# skicka frågor till API (1000 resor ~ 6min) 
+Start = list()
+Stop = list()
+StartHplID = list()
+StopHplID = list()
+StartTid = list()
+AnkomstTid = list()
+AntalBytePerResa = list()
+Linje = list()
+
+for(i in 1:nrow(df4)){
+  try({
+  data = fromJSON(paste0(df4$url[i])) 
+  message("Hämta resa ", i)
+  Start[[i]] = data$from$name
+  Stop[[i]] = data$to$name
+  StartHplID[[i]] = data$from$id
+  StopHplID[[i]] = data$to$id
+  StartTid[[i]] = data$departureDateTime
+  AnkomstTid[[i]] = data$arrivalDateTime
+  AntalBytePerResa[[i]] = data$noOfChanges
+  })
+}
+
+##### slå ihopp allt i en df
+fin = do.call(rbind, Map(data.frame, 
+                         Start=Start, Stop = Stop, StartHplID = StartHplID, StopHplID = StopHplID,
+                         StartTid = StartTid, AnkomstTid = AnkomstTid, AntalBytePerResa = AntalBytePerResa))
+
+write.csv2(fin, "02_output_data/temp/skol.csv", row.names = F)
+
+# ta bort duplikater 
+# om det inte finns tillräckligt många turer per timma (API försöker alltid att hitta 6 turer per resa) hittar APIn turer på en annan tid 
+# om man sen söker efter turer kl 06 hittar man samma turer och antal turer får inte adderas 
+fin1 = fin %>% distinct() 
+write.csv2(fin1, "02_output_data/temp/skol1.csv", row.names = F)
+
+# skapa nya variabler 
+# APIs svar är i UTC -> byta från UTC till lokal tid
+fin2 = fin1 %>%
+  filter(substr(StartTid, 1, 10) %in% date) %>% # filtrera bort alla rader med datum som är INTE datum som används i sökningen
+  mutate(StartTid = as.POSIXct(paste(substr(StartTid, 1, 10), substr(StartTid, 12, 19), sep = " "), tz="UTC"),
+         AnkomstTid = as.POSIXct(paste(substr(AnkomstTid, 1, 10), substr(AnkomstTid, 12, 19), sep = " "), tz="UTC"),
+         StartTidLokal = format(StartTid, tz="Europe/Berlin",usetz=TRUE),
+         AnkomstTidLokal = format(AnkomstTid, tz="Europe/Berlin",usetz=TRUE),
+         DygnsTimma = paste0("t", substr(StartTidLokal, 12, 13)),
+         ResTid = AnkomstTid - StartTid,
+         StartStop = paste0(Start, "_", Stop)) %>% 
+  dplyr::select(-StartTid, -AnkomstTid)
+
+write.csv2(fin2, "02_output_data/temp/skol2.csv", row.names = F)
+
+# identifiera första och sista dygnstimma som ingår i data
+FirstHr = sort(fin2$DygnsTimma)[1]
+LastHr = sort(fin2$DygnsTimma)[length(fin2$DygnsTimma)]
+
+
+AntalTurerPerBytePerDygnsTimma = fin2 %>% 
+  count(StartStop, StartHplID, StopHplID, AntalBytePerResa, DagTyp = substr(StartTidLokal,1, 10), DygnsTimma) %>%
+  spread(DygnsTimma, n, fill=0) %>%
+  gather(DygnsTimma, AntalTurer, FirstHr:LastHr) %>%
+  mutate(DygnsTimma = substr(DygnsTimma, 2, 3),
+         TimmaTyp = ifelse(DygnsTimma %in% fm_rusning, "fm_rusning",
+                           ifelse(DygnsTimma %in% em_rusning, "em_rusning", NA))) %>%
+  filter(!is.na(TimmaTyp)) 
+
+# det finns inga skolor med samma namn
+# HplInomSkolBuffer %>% dplyr::select(id, Namn) %>% distinct() %>% group_by(id, Namn) %>% summarise(n = n()) %>% arrange(-n)  
+  
+fin3 = fin2 %>% 
+    count(StartStop, StartHplID, StopHplID, AntalBytePerResa, DagTyp = substr(StartTidLokal,1, 10), DygnsTimma) %>%
+    spread(DygnsTimma, n, fill=0) %>%
+    gather(DygnsTimma, AntalTurer, FirstHr:LastHr) %>%
+    mutate(DygnsTimma = substr(DygnsTimma, 2, 3),
+           TimmaTyp = ifelse(DygnsTimma %in% fm_rusning, "fm_rusning",
+                             ifelse(DygnsTimma %in% em_rusning, "em_rusning", NA))) %>%
+    filter(!is.na(TimmaTyp)) %>%
+    left_join(., HplInomSkolBuffer[,c("Namn", "HplID")], # add skol info
+              by = c("StartHplID" = "HplID"))  %>%
+    left_join(., HplInomSkolBuffer[,c("Namn", "HplID")], 
+              by = c("StopHplID" = "HplID")) %>%
+    mutate(SkolNamn = ifelse(is.na(Namn.x), Namn.y, Namn.x)) %>%
+    dplyr::select(-Namn.x, -Namn.y) %>%
+    left_join(., OvrigTatort1[,c("Tatort", "HplID")], # add tätort info
+              by = c("StartHplID" = "HplID"))  %>%
+    left_join(., OvrigTatort1[,c("Tatort", "HplID")], 
+              by = c("StopHplID" = "HplID")) %>%
+    mutate(Tatort = ifelse(is.na(Tatort.x), Tatort.y, Tatort.x)) %>%
+    dplyr::select(-Tatort.x, -Tatort.y) %>%
+    filter(as.numeric(AntalBytePerResa) <= 1) %>% # bara resor med <=1 byte ingår
+    group_by(SkolNamn, Tatort, DagTyp, TimmaTyp) %>% # "DygnsTimma" behövs inte eftersom 1 per TimmaTyp är tillräckligt
+    summarise(SummaAntalTurer = sum(as.numeric(AntalTurer))) %>% # antal turer med <= 1 byte
+    filter(SummaAntalTurer > 0) %>% 
+    spread(TimmaTyp, SummaAntalTurer, fill = 0)
+
+# skapa df för med alla reserelationer som bör finnas i API resultat
+AllaSkolTatortKombinationer = merge(skol@data$Namn, unique(OvrigTatort1$Tatort))
+AllaSkolTatortKombinationer$DagTyp = dateVardag
+
+AllaSkolTatortKombinationer2 = AllaSkolTatortKombinationer %>% 
+  mutate(DagTyp = dateHelg) %>%
+  bind_rows(., AllaSkolTatortKombinationer)
+
+colnames(AllaSkolTatortKombinationer2) = c("SkolNamn", "Tatort", "DagTyp")  
+
+fin4 = AllaSkolTatortKombinationer2 %>% 
+  left_join(., fin3, by = c("SkolNamn", "Tatort", "DagTyp")) %>%
+  mutate(Resultat = ifelse(em_rusning >=1 & fm_rusning >= 1, "Ok", "EjOk")) %>%
+  dplyr::select(-em_rusning, -fm_rusning) %>%
+  spread(DagTyp, Resultat)
+
+# Skol-Tätort kombinationer som saknas
+fin4 %>%
+  filter(!is.na(em_rusning))
 
 
 
