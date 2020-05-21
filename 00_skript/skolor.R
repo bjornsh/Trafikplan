@@ -118,8 +118,6 @@ MinAntalHplOvrigTatort = OvrigTatort1 %>%
 
 
 #### Minska antal hpl som ingår i API skriptet ####
-
-
 # ett antal hpl inom samma buffer trafikeras av exakt samma linjer
 HplInomSkolBuffer %>% 
   left_join(., hpl, by = c("HplID" = "hpl_id")) %>%
@@ -217,6 +215,7 @@ df4$url = paste0("https://api.ul.se/api/v4/journeys?",
 
 
 # skicka frågor till API (1000 resor ~ 6min) 
+tid1 = Sys.time()
 Start = list()
 Stop = list()
 StartHplID = list()
@@ -239,6 +238,10 @@ for(i in 1:nrow(df4)){
   AntalBytePerResa[[i]] = data$noOfChanges
   })
 }
+
+tid2 = Sys.time()
+
+tid2-tid1
 
 ##### slå ihopp allt i en df
 fin = do.call(rbind, Map(data.frame, 
@@ -325,19 +328,17 @@ fin4 = AllaSkolTatortKombinationer2 %>%
   left_join(., fin3, by = c("SkolNamn", "Tatort", "DagTyp")) %>%
   mutate(Resultat = ifelse(em_rusning >=1 & fm_rusning >= 1, "Ok", "EjOk")) %>%
   dplyr::select(-em_rusning, -fm_rusning) %>%
-  spread(DagTyp, Resultat)
+  spread(DagTyp, Resultat, fill = "EjOk")
 
-# Skol-Tätort kombinationer som saknas
-fin4 %>%
-  filter(!is.na(em_rusning))
+fin4$Resultat = ifelse(fin4[,3] == "Ok" & fin4[,4] == "Ok", "VardagOchHelgOK",
+                       ifelse(fin4[,3] == "Ok" & fin4[,4] == "EjOk", "VardagOK",
+                              ifelse(fin4[,3] == "EjOk" & fin4[,4] == "Ok", "HelgOK",
+                                     ifelse(fin4[,3] == "EjOk" & fin4[,4] == "EjOk", "EjOK", "XXX"))))
 
+SkolSummary = fin4 %>% group_by(Resultat) %>% tally()
 
-
-
-
-
-
-
+write.csv2(fin4, "02_output_data/skolor.csv", row.names = F)
+write.csv2(SkolSummary, "02_output_data/skolor_ResultatKort.csv", row.names = F)
 
 
 
