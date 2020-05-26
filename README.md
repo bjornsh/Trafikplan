@@ -20,6 +20,12 @@ Jämför existerande utbud med TFP grundläggande utbudsnivåer https://www.regi
 * Hantera data och skapa resultatfil
 
 
+**indikatorer**
+* 02_ul_api.R: 1.1, 1.2, 2.1, 2.2, 3.1, 3.2
+* Aktiviteter: 4.2
+* Skolor: 5.1
+
+
 
 ## TODO
 * lägg till skolor

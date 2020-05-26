@@ -8,10 +8,10 @@ invisible(gc())
 
 
 # Indikatorplan
-plan = read_excel("Z:/aa_utredning/Trafikplan/analysplan.xlsx", sheet = "data")
+plan = read_excel("01_input_data/analysplan.xlsx", sheet = "data")
 
 # alla hpl med tätort info
-dat = read.csv2("01_input_data/HplData_2020-05-14.csv", stringsAsFactors=FALSE)
+dat = read.csv2("01_input_data/HplData_2020-05-19.csv", stringsAsFactors=FALSE)
 
 # ladda df med en hpl per tätort
 hpl = read.csv("01_input_data/TatortMedEnHpl.csv", sep = ";", 
@@ -27,8 +27,7 @@ plan1 = plan %>% filter((!is.na(StartTatort) | !is.na(StopTatort)) &
                           Indikator == "2.1" | 
                           Indikator == "2.2" | 
                           Indikator == "3.1" | 
-                          Indikator == "3.2" | 
-                          Indikator == "4.1"))  
+                          Indikator == "3.2"))  
 
 # lägg till HplID för tätorter där vi använder bara en eller två hpl (för att effektivisera API körning) 
 plan2 = plan1 %>%

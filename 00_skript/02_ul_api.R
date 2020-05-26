@@ -1,3 +1,6 @@
+
+# indikatorer 1.1, 1.2, 2.1, 2.2, 3.1, 3.2
+
 library(jsonlite)
 library(tidyr)
 library(dplyr)
@@ -9,8 +12,8 @@ invisible(gc())
 plan = read.csv2("01_input_data/AnalysPlanInputForAPI.csv")
 
 # antal unika hpl per tätort
-plan %>% group_by(StartTatort) %>% summarise(n = n_distinct(StartHplID)) %>% arrange(desc(n)) %>% print(., n = Inf)
-plan %>% group_by(StopTatort) %>% summarise(n = n_distinct(StopHplID)) %>% arrange(desc(n)) %>% print(., n = Inf)
+# plan %>% group_by(StartTatort) %>% summarise(n = n_distinct(StartHplID)) %>% arrange(desc(n)) %>% print(., n = Inf)
+# plan %>% group_by(StopTatort) %>% summarise(n = n_distinct(StopHplID)) %>% arrange(desc(n)) %>% print(., n = Inf)
 
 
 # definera rusnings- och ej-rusningstimmar. 0000 - 0459 ingår inte i analysen
@@ -18,7 +21,7 @@ rusning = c("06", "07", "08", "15", "16", "17", "18")
 ejrusning = c("05", "09", "10", "11", "12", "13", "14", "19", "20", "21", "22", "23")
 
 # test run, ta bort för full körning
-plan = plan[c(1,20,30, 40,50,1000,2000),]
+plan = plan[c(1,20,30, 40,50,100,200),]
 
 # skapa df för senare användning
 StartTatort = plan %>% dplyr::select(StartTatort, StartHplID) %>% distinct()
@@ -156,7 +159,8 @@ fin3 = fin2 %>%
   left_join(., plan[,c("StartHplID", "StopHplID", "AntalTurerPerRusningTimma", "AntalTurerPerEjRusningTimma")],
             by = c("StartHplID" = "StartHplID", "StopHplID" = "StopHplID")) %>%
   mutate(AntalTurer = as.numeric(SummaAntalTurer)) %>%
-  mutate(TillrackligAntalTurer = ifelse(TimmaTyp == "rusning" & AntalTurer >= 2, "Ja", "Nej"))
+  mutate(TillrackligAntalTurer = ifelse((TimmaTyp == "rusning" & AntalTurer >= 2) |
+                                          (TimmaTyp == "ejrusning" & AntalTurer >= 1), "Ja", "Nej"))
   
 
 #### Slutresultat #####
@@ -185,15 +189,15 @@ fin5 = fin4 %>%
 
 # print(fin5, n = Inf)
 
-planx = plan %>% 
+fin6 = plan %>% 
   dplyr::select(Indikator, StartTatort, StopTatort) %>%
-  distinct()
-
-fin6 = fin5 %>% 
-  left_join(., planx, by = c("StartTatort", "StopTatort")) %>%
+  distinct() %>%
+  right_join(., fin5, by = c("StartTatort", "StopTatort")) %>%
   arrange(Indikator) %>%
-  dplyr::select(Indikator, StartTatort, StopTatort, Rusningstimmar = rusning, Lågtrafiktimmar = ejrusning)
-
+  dplyr::select(Indikator, StartTatort, StopTatort, Rusningstimmar = rusning, Lågtrafiktimmar = ejrusning) %>%
+  mutate(Rusningstimmar = round(Rusningstimmar, 2), 
+         Lågtrafiktimmar = round(Lågtrafiktimmar, 2))
+  
 # print(fin6, n = Inf)
 
 write.csv2(fin6, paste0("02_output_data/Resultat_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
