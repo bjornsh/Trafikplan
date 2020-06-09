@@ -1,3 +1,22 @@
+#---------------------------------------------------------------------------------------------------
+# Syfte
+#---------------------------------------------------------------------------------------------------
+
+## Hämta ID och koordinater för ULs hållplatser och identifiera i vilken kommun och tätort de är
+## skapa input filen för skriptet "01_skapa_ramverk"
+
+
+
+#---------------------------------------------------------------------------------------------------
+# Städa
+#---------------------------------------------------------------------------------------------------
+rm(list = ls())
+invisible(gc())
+
+
+#---------------------------------------------------------------------------------------------------
+# Libraries
+#---------------------------------------------------------------------------------------------------
 library(httr)
 library(rlist)
 library(jsonlite)
@@ -6,16 +25,18 @@ library(sp)
 library(rgdal)
 library(raster)
 
-rm(list = ls())
-invisible(gc())
 
 `%notin%` <- Negate(`%in%`)
 
-#### import API hpl data ####
+
+
+#---------------------------------------------------------------------------------------------------
+# Hämta hållplats data
+#---------------------------------------------------------------------------------------------------
+
+## import API hpl data
 baseurl = "https://api.ul.se/api/v3/line/"
 linje = list()
-
-#linje_list = c("1", "3") 
 
 for(i in 1:999){ # alternativ: length(linje_list)
   ul = fromJSON(paste0(baseurl, i), flatten=TRUE)
@@ -23,13 +44,18 @@ for(i in 1:999){ # alternativ: length(linje_list)
 }
 
 alla_linjer <- rbind_pages(linje)
-#alla_linjer <- rbind_pages(linje[sapply(linje, length)>0])
+
+## skulle det inte fungera använd:
+# alla_linjer <- rbind_pages(linje[sapply(linje, length)>0])
+
 
 colnames(alla_linjer) = c("linje", "hpl_id", "hpl_namn", "area", "lat", "long")
 
-LinjeExklud = c("990", "982", "984", "986", "988") # exkludera linjer som är sjukresebuss eller färja
+## exkludera linjer som är sjukresebuss eller färja
+LinjeExklud = c("990", "982", "984", "986", "988") 
 
 
+## df med hållplats ID och respektive koordinater i WGS84
 HplIdKoordinat = alla_linjer %>% 
   filter(linje %notin% LinjeExklud) %>%
   dplyr::select(hpl_id, lat, long) %>% 
@@ -37,10 +63,11 @@ HplIdKoordinat = alla_linjer %>%
   group_by(hpl_id) %>%
   filter(row_number()==1) # unik hpl ID
   
+## df med alla linjer som trafikera en hpl 
 AllaLinjerPerHplID = alla_linjer %>% 
   dplyr::select(linje, hpl_id) %>% 
   mutate(hpl_id = as.character(hpl_id)) %>%
-  distinct() %>% # tex linje 2 har 700600 två gånger
+  distinct() %>% # tex linje 2 har hpl 700600 två gånger
   group_by(hpl_id) %>% 
   dplyr::summarise(AllaLinjer = paste(linje, collapse = "_"))
 
@@ -49,15 +76,19 @@ write.csv2(HplIdKoordinat, paste0("01_input_data/HplIdKoordinat_", substr(Sys.ti
 write.csv2(AllaLinjerPerHplID, paste0("01_input_data/AllaLinjerPerHplID_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 
 
-### matcha hpl med shapefil ####
-# Konvertera API hållplats koordinater från WGS84 till SWEREF (för att merge med shapefiler) 
+
+#---------------------------------------------------------------------------------------------------
+# Extrahera geometadata
+#---------------------------------------------------------------------------------------------------
+
+## Konvertera API hållplats koordinater från WGS84 till SWEREF (för att merge med shapefiler) 
 UnikKoordinat = HplIdKoordinat %>%
   ungroup() %>%
   dplyr::select(lat, long)
 
 UnikKoordinatKOPIA = UnikKoordinat
 
-# definera projection string
+## definera projection string
 SWEREF99TM = "+proj=utm +zone=33 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
 # WGS84 = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"
 
@@ -73,7 +104,7 @@ kommun=readOGR("01_input_data/shp/ak_riks.shp",
                stringsAsFactors = FALSE, verbose = FALSE, encoding = "UTF-8")
 
 
-# ladda ner, unzip och importera tätort shp till R
+## ladda ner, unzip och importera tätort shp till R
 td = tempdir()
 tf = tempfile(tmpdir=td, fileext=".zip")
 
@@ -87,21 +118,21 @@ tatort <- readOGR(paste0(td2, "/To2018_Swe99TM.shp"), stringsAsFactors = FALSE, 
 unlink(td)
 
 
-# några av SCB tätorter är del av ULs stadstrafik och bör kategoriseras som Uppsala tätort
-# Ultuna = T0654; Sävja = T0632; Håga = T0566
+## några av SCB tätorter är del av ULs stadstrafik och bör kategoriseras som Uppsala tätort
+## Ultuna = T0654; Sävja = T0632; Håga = T0566
 omkateg = c("T0654", "T0632", "T0566")  
 
 tatort@data = tatort@data %>% 
   mutate(TATORT = ifelse(TATORTSKOD %in% omkateg, "Uppsala", TATORT))
 
-# merge hpl coordinates with shapefiles 
+## merge hpl coordinates with shapefiles 
 hpl_kommun <- data.frame(coordinates(UnikKoordinat_sweref),
                          raster::extract(kommun, UnikKoordinat_sweref))
 hpl_tatort <- data.frame(coordinates(UnikKoordinat_sweref),
                          raster::extract(tatort, UnikKoordinat_sweref))
 
 
-# append files: alla hpl med all meta data
+## append files: alla hpl och all meta data
 hpl_meta = cbind(HplIdKoordinat, 
                  hpl_kommun[,c("long", "lat", "KOMMUNNAMN", "LANSNAMN")], 
                  hpl_tatort[,c("TATORTSKOD", "TATORT", "BEF")])
@@ -110,7 +141,7 @@ colnames(hpl_meta) = c("HplID", "Hpl_Wgs84North", "Hpl_Wgs84East", "Hpl_SwerefEa
                        "TatortNamn", "Befolkning2018") # "DesoID", "RutID", 
 
 
-# Bålsta buss och tåg station ligger utanför tätorten och fick inget tätortnamn: raster::extract()
+## Bålsta buss och tåg station ligger utanför tätorten och fick inget tätortnamn: raster::extract()
 hpl_meta = hpl_meta %>%
   as.data.frame() %>%
   mutate(TatortNamn = if_else(HplID == "705003" | HplID == "105112", "Bålsta", TatortNamn),
@@ -130,7 +161,9 @@ hpl_meta = hpl_meta %>%
   mutate(TatortTyp = ifelse(is.na(TatortTyp), "Utanför tätort", TatortTyp)) %>%
   mutate(HplID = as.character(HplID))
 
-# det krävs datum i filnamn eftersom API data reflektera idags tidtabell
+
+## spara resultatfilen
+## det krävs datum i filnamn eftersom API data reflekterar idags tidtabell
 write.csv2(hpl_meta, paste0("01_input_data/HplData_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 
 
