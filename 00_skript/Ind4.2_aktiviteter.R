@@ -3,6 +3,10 @@
 #---------------------------------------------------------------------------------------------------
 
 ## Utvärdera TFP indikator 4.2
+
+## Indikator 4.2: Förbindelser som möjliggör resa till och från aktiviteter på kvällen i kommunhuvudorten.
+## Förbindelser ska finnas under helger och skollov. 
+
 ## Indikator tolkning: Från alla hpl i alla medelstora tätorter (1000-6999 befolkning) som är inte kommunhuvudort till alla respektive 
 ## kommunhuvudorter i länet finns minst 1 resmöjlighet med max 1 byte mellan 1900 och 2159 på vardagar och helger
 ## plus en resemöjlighet i motsatt riktning inom samma tidsperiod (för att komma hem).
@@ -35,7 +39,7 @@ library(jsonlite)
 # Hämta data
 #---------------------------------------------------------------------------------------------------
 
-## tätort shp
+## SCB tätort shp
 td = tempdir()
 tf = tempfile(tmpdir=td, fileext=".zip")
 
@@ -195,8 +199,7 @@ fin = do.call(rbind, Map(data.frame,
                          Start=Start, Stop = Stop, StartHplID = StartHplID, StopHplID = StopHplID,
                          StartTid = StartTid, AnkomstTid = AnkomstTid, AntalBytePerResa = AntalBytePerResa))
 
-write.csv2(fin, "02_output_data/temp/aktiviteter.csv", row.names = F)
-
+write.csv2(fin, paste0("02_output_data/temp/aktiviteter_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 
 
 #---------------------------------------------------------------------------------------------------
@@ -207,8 +210,8 @@ write.csv2(fin, "02_output_data/temp/aktiviteter.csv", row.names = F)
 ## om det inte finns tillräckligt många turer per timma (API försöker alltid att hitta 6 turer per resa) hittar APIn turer på en annan tid 
 ## om man sen söker efter turer kl 06 hittar man samma turer och antal turer får inte adderas 
 fin1 = fin %>% distinct() 
-write.csv2(fin1, "02_output_data/temp/aktiviteter1.csv", row.names = F)
 
+write.csv2(fin1, paste0("02_output_data/temp/aktiviteter1_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 
 # skapa nya variabler 
 # APIs svar är i UTC -> byta från UTC till lokal tid
@@ -224,9 +227,10 @@ fin2 = fin1 %>%
          StartStop = paste0(Start, "_", Stop)) %>% 
   dplyr::select(-StartTid, -AnkomstTid)
 
-write.csv2(fin2, "02_output_data/temp/aktiviteter2.csv", row.names = F)
+write.csv2(fin2, paste0("02_output_data/temp/aktiviteter2_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 
-# identifiera första och sista dygnstimma som ingår i data
+
+## identifiera första och sista dygnstimma som ingår i data
 FirstHr = sort(fin2$DygnsTimma)[1]
 LastHr = sort(fin2$DygnsTimma)[length(fin2$DygnsTimma)]
 
@@ -275,7 +279,7 @@ saknas = Resrelation %>% filter(concat %notin% temp2$concat |
          SummaAntalTurer = 0) %>%
   dplyr::select(Typ, StartTatort = MedelTatort, StopTatort = HuvudTatort, SummaAntalTurer)
 
-## slå ihop finns och finns inte
+## slå ihop "finns" och "finns inte"
 resultat2 = rbind(resultat, saknas)
 
 resultat2 = resultat2 %>% 
@@ -283,6 +287,4 @@ resultat2 = resultat2 %>%
   ungroup() %>%
   dplyr::select(-Typ) %>% print(., n = Inf)
 
-write.csv2(resultat2, "02_output_data/aktiviteter.csv", row.names = F)
-
-
+write.csv2(resultat2, paste0("02_output_data/resultat_aktiviteter_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
