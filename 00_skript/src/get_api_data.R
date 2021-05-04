@@ -239,5 +239,5 @@ fin6 = plan %>%
   
 # print(fin6, n = Inf)
 
-write.csv2(fin6, paste0("00_skript/data/output//Resultat_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
+write.csv2(fin6, paste0("00_skript/data/output/Resultat_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 }
