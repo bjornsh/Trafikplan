@@ -29,7 +29,9 @@ required_packages_list <- c("httr",
                             "raster",
                             "readxl",
                             "tidyr",
-                            "stringr")
+                            "stringr",
+                            "lubridate",
+                            "rgeos")
 
 required_scripts_list <- c("get_stop_and_line_data.R",
                            "create_api_input_dataframe.R",
@@ -43,30 +45,36 @@ lapply(required_packages_list, require, character.only = TRUE)
 sapply(paste0(getwd(),"/00_skript/src/", required_scripts_list), source)
 
 APIkey_GTFS_regional_static_data <- "ed1a746e1a454d7a99aab00f2b64f581"
-#possibly add code to download the static data here
+#possibly later add code to download the static data here
 
 
 #Call 00_hpl_data_API.r to get all lines and stops and connect them to municipalities and tätorter.
-get_stop_and_line_data()
+vector_lines_excluded <-  c("990", "982", "984", "986", "988")
+storreg_tat <- c("Stockholm", "Gävle", "Uppsala", "Västerås")
+get_stop_and_line_data(vector_lines_excluded, 
+                       storreg_tat)
 
 
 #Call 01_skapa_ramverk.r to create the data-frame for the API call based on the desired indicators.
-create_api_input_dataframe()
+desired_indicators = c(
+    "1.1",
+    "1.2",
+    "2.1",
+    "2.2",
+    "3.1",
+    "3.2"
+)
+create_api_input_dataframe(desired_indicators)
 
 
 #Call 02_ul_api.r to call the API and get supply data to assess supply on the indicators.
-get_api_data()
+peak_hours <- c("06", "07", "08", "15", "16", "17", "18")
+off_peak_hours <- c("05", "09", "10", "11", "12", "13", "14", "19", "20", "21", "22", "23")
+alternatives_to_count = 3
+run_date = "2021-05-04"
 
-
-#TO DO
-
-##code dynamic components to decide the parameters of the analysis
-##(max tt / max number of stops / which lines / what is peak)
-##total trips available
-
-
-##kolla varför det kraschar med hpl:erna, skapa ett kontrollsteg
-
-##granska aggreggeringen och borttagning av hållplatserna - är det något som saknas?
-
-##förstå dplyr kodningen, se över om det kan förenklas
+get_api_data(peak_hours,
+             off_peak_hours,
+             TRUE,
+             alternatives_to_count,
+             run_date)

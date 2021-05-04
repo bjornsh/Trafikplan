@@ -1,16 +1,15 @@
-get_api_data <- function(){
+get_api_data <- function(vector_peak_hrs = c("06", "07", "08", "15", "16", "17", "18"),
+                         vector_off_peak_hrs = c("05", "09", "10", "11", "12", "13", "14", "19", "20", "21", "22", "23"),
+                         test_run = FALSE,
+                         alternatives = 6,
+                         api_date = today()){
 
 # indikatorer 1.1, 1.2, 2.1, 2.2, 3.1, 3.2
-
-library(jsonlite)
-library(tidyr)
-library(dplyr)
-library(stringr)
-
-rm(list = ls())
+#rm(list = ls())
 invisible(gc())
 
-plan = read.csv2("01_input_data/AnalysPlanInputForAPI.csv")
+plan = read.csv2("00_skript/data/interim/AnalysPlanInputForAPI.csv")
+
 
 # antal unika hpl per tätort
 # plan %>% group_by(StartTatort) %>% summarise(n = n_distinct(StartHplID)) %>% arrange(desc(n)) %>% print(., n = Inf)
@@ -18,11 +17,15 @@ plan = read.csv2("01_input_data/AnalysPlanInputForAPI.csv")
 
 
 # definera rusnings- och ej-rusningstimmar. 0000 - 0459 ingår inte i analysen
-rusning = c("06", "07", "08", "15", "16", "17", "18")
-ejrusning = c("05", "09", "10", "11", "12", "13", "14", "19", "20", "21", "22", "23")
+#rusning = c("06", "07", "08", "15", "16", "17", "18")
+rusning = vector_peak_hrs
+#ejrusning = c("05", "09", "10", "11", "12", "13", "14", "19", "20", "21", "22", "23")
+ejrusning = vector_off_peak_hrs
 
 # test run, ta bort för full körning
+if(test_run){
 plan = plan[c(1,20,30, 40,50,100,200),]
+}
 
 # skapa df för senare användning
 StartTatort = plan %>% dplyr::select(StartTatort, StartHplID) %>% distinct()
@@ -36,21 +39,26 @@ StopTatort = plan %>% dplyr::select(StopTatort, StopHplID) %>% distinct()
 df = plan %>% dplyr::select(StartHplID, StopHplID)
 
 # test run
-time = c("05:00:00", "08:00:00", "11:00:00", "15:00:00") # midnatt = "00:00:00"
+if(test_run){
+  time = c("05:00:00", "08:00:00", "11:00:00", "15:00:00")# midnatt = "00:00:00"
 #time = c("06:00:00", "07:00:00", "08:00:00", "15:00:00", "16:00:00", "17:00:00", "18:00:00", "19:00:00") # midnatt = "00:00:00"
-
+} else {
+  time = c("05:00:00", "06:00:00", "07:00:00", "08:00:00", "09:00:00", "10:00:00", "11:00:00", "12:00:00",
+  "13:00:00", "14:00:00", "15:00:00", "16:00:00", "17:00:00", "18:00:00", "19:00:00", "20:00:00",
+   "21:00:00", "22:00:00", "23:00:00") # midnatt = "00:00:00"
+}
 
 # full run
 # time = c("05:00:00", "06:00:00", "07:00:00", "08:00:00", "09:00:00", "10:00:00", "11:00:00", "12:00:00",
 #          "13:00:00", "14:00:00", "15:00:00", "16:00:00", "17:00:00", "18:00:00", "19:00:00", "20:00:00",
 #          "21:00:00", "22:00:00", "23:00:00") # midnatt = "00:00:00"
 
-date = "2021-03-26"
+date = api_date
 
 n = length(time)
 df1 = do.call("rbind", replicate(n, df, simplify = FALSE))
 
-timereplokal = rep(time, each=length(start))
+timereplokal = rep(time, each=dim(df1[1]))
 daterep = rep(date, each=length(timereplokal))
 
 df2 = data.frame(df1, daterep, timereplokal)
@@ -68,6 +76,9 @@ df2$url = paste0("https://api.ul.se/api/v4/journeys?",
                  "&directionType=", "0",
                  "&trafficTypes=","1,2,3,4,5,6,7,8,9,10,11")
 
+#clear some memory
+rm(daterep, timereplokal)
+
 
 # skicka frågor till API (1000 resor ~ 6min) 
 Start = list()
@@ -82,31 +93,55 @@ Linje = list()
 ##!! remove rows with NAs
 df2 <- df2 %>% filter(!is.na(StartHplID) & !is.na(StopHplID))
 
-for(i in 1:nrow(df2)){
-  data = fromJSON(paste0(df2$url[i])) 
-  message("Hämta resa ", i)
-  Start[[i]] = data$from$name
-  Stop[[i]] = data$to$name
-  StartHplID[[i]] = data$from$id
-  StopHplID[[i]] = data$to$id
-  StartTid[[i]] = data$departureDateTime
-  AnkomstTid[[i]] = data$arrivalDateTime
-  AntalBytePerResa[[i]] = data$noOfChanges
+
+get_JSON_data_from_UL_API <- function(url_api){
+    data = fromJSON(url_api)
 }
+
+extract_data_from_API_df <- function(api_df, data_to_extract, max_alternatives = 6){
+  switch(data_to_extract,
+         "from_name" = api_df$from$name[1:max_alternatives],
+         "to_name" = api_df$to$name[1:max_alternatives],
+         "from_id" = api_df$from$id[1:max_alternatives],
+         "to_id" = api_df$to$id[1:max_alternatives],
+         "dep_time" = api_df$departureDateTime[1:max_alternatives],
+         "arr_time" = api_df$arrivalDateTime[1:max_alternatives],
+         "changes" = api_df$noOfChanges[1:max_alternatives]
+         )
+}
+
+alternatives = 3
+ptm <- proc.time()
+latest_row <- 1
+while(latest_row <= nrow(df2)){
+  
+    last_row <- min(nrow(df2), latest_row + 9)
+    x <- lapply(df2$url[latest_row:last_row], get_JSON_data_from_UL_API)
+    message("Hämtat resor ", latest_row, " - ", last_row)
+    Start[latest_row:last_row] = lapply(x, extract_data_from_API_df, "from_name", alternatives)
+    Stop[latest_row:last_row] = lapply(x, extract_data_from_API_df, "to_name", alternatives)
+    StartHplID[latest_row:last_row] = lapply(x, extract_data_from_API_df, "from_id", alternatives)
+    StopHplID[latest_row:last_row] = lapply(x, extract_data_from_API_df, "to_id", alternatives)
+    StartTid[latest_row:last_row]  = lapply(x, extract_data_from_API_df, "dep_time", alternatives)
+    AnkomstTid[latest_row:last_row]  = lapply(x, extract_data_from_API_df, "arr_time", alternatives)
+    AntalBytePerResa[latest_row:last_row]  = lapply(x, extract_data_from_API_df, "changes", alternatives)
+    rm(x)
+    latest_row <- last_row + 1
+}
+proc.time() - ptm
 
 ##### slå ihopp allt i en df
 fin = do.call(rbind, Map(data.frame, 
                          Start=Start, Stop = Stop, StartHplID = StartHplID, StopHplID = StopHplID,
                          StartTid = StartTid, AnkomstTid = AnkomstTid, AntalBytePerResa = AntalBytePerResa))
 
-write.csv2(fin, "02_output_data/temp/fin.csv", row.names = F) ##!!temp folder must exist
-
+write.csv2(fin, "00_skript/data/output/fin.csv", row.names = F)
 
 # ta bort duplikater 
 # om det inte finns tillräckligt många turer per timma (API försöker alltid att hitta 6 turer per resa) hittar APIn turer på en annan tid 
 # om man sen söker efter turer kl 06 hittar man samma turer och antal turer får inte adderas 
 fin1 = fin %>% distinct() 
-write.csv2(fin1, "02_output_data/temp/fin1.csv", row.names = F)
+write.csv2(fin1, "00_skript/data/output/fin1.csv", row.names = F)
 
 
 # skapa nya variabler 
@@ -122,7 +157,7 @@ fin2 = fin1 %>%
          StartStop = paste0(Start, "_", Stop)) %>% 
   dplyr::select(-StartTid, -AnkomstTid)
 
-write.csv2(fin2, "02_output_data/temp/fin2.csv", row.names = F)
+write.csv2(fin2, "00_skript/data/output/fin2.csv", row.names = F)
 
 # identifiera första och sista dygnstimma som ingår i data
 FirstHr = sort(fin2$DygnsTimma)[1]
@@ -131,12 +166,12 @@ LastHr = sort(fin2$DygnsTimma)[length(fin2$DygnsTimma)]
 
 AntalTurerPerBytePerDygnsTimma = fin2 %>% 
   count(StartStop, StartHplID, StopHplID, AntalBytePerResa, DygnsTimma) %>%
-  spread(DygnsTimma, n, fill=0) %>%
-  gather(DygnsTimma, AntalTurer, FirstHr:LastHr) %>%
+  spread(DygnsTimma, n, fill = 0) %>%
+  gather(DygnsTimma, AntalTurer, all_of(FirstHr):all_of(LastHr)) %>%
   mutate(DygnsTimma = substr(DygnsTimma, 2, 3),
          TimmaTyp = ifelse(DygnsTimma %in% rusning, "rusning",
                            ifelse(DygnsTimma %in% ejrusning, "ejrusning", NA))) %>%
-  filter(!is.na(TimmaTyp)) 
+  filter(!is.na(TimmaTyp))
 
 
 # när "plan" är redo med lägg till  
@@ -148,7 +183,7 @@ AntalTurerPerBytePerDygnsTimma = fin2 %>%
 fin3 = fin2 %>% 
   count(StartStop, StartHplID, StopHplID, AntalBytePerResa, DygnsTimma) %>%
   spread(DygnsTimma, n, fill=0) %>%
-  gather(DygnsTimma, AntalTurer, FirstHr:LastHr) %>%
+  gather(DygnsTimma, AntalTurer, all_of(FirstHr):all_of(LastHr)) %>%
   mutate(DygnsTimma = substr(DygnsTimma, 2, 3),
          TimmaTyp = ifelse(DygnsTimma %in% rusning, "rusning",
                     ifelse(DygnsTimma %in% ejrusning, "ejrusning", NA))) %>%
@@ -204,5 +239,5 @@ fin6 = plan %>%
   
 # print(fin6, n = Inf)
 
-write.csv2(fin6, paste0("02_output_data/Resultat_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
+write.csv2(fin6, paste0("00_skript/data/output//Resultat_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 }

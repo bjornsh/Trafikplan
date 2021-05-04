@@ -1,4 +1,4 @@
-get_stop_and_line_data <- function(){
+get_stop_and_line_data <- function(excluded_lines, storregionala_tatorter){
   
 #---------------------------------------------------------------------------------------------------
 # Syfte
@@ -18,14 +18,18 @@ baseurl = "https://api.ul.se/api/v3/line/"
 linje = list()
 
 for(i in 1:999){ # alternativ: length(linje_list)
-  ul = fromJSON(paste0(baseurl, i), flatten=TRUE)
-  if (!is.null(ul)){
-    if (ul$name != "Ersättningsbuss"){
-      linje <- append(linje, list(cbind(ul$lineNo, ul$name, ul$pointsOnRoute)))
-    }
-    else{
-      print(paste0("Linje ", ul$lineNo, " är en Ersättningsbuss och har exkluderats.
-                   Linjens sträcka är ", ul$description))
+  r = GET(paste0(baseurl, i))
+  if(status_code(r) == 200){
+    ul = fromJSON(paste0(baseurl, i), flatten=TRUE)
+  
+    if (!is.null(ul)){
+      if (ul$name != "Ersättningsbuss"){
+        linje <- append(linje, list(cbind(ul$lineNo, ul$name, ul$pointsOnRoute)))
+      }
+      else{
+        print(paste0("Linje ", ul$lineNo, " är en Ersättningsbuss och har exkluderats.
+                     Linjens sträcka är ", ul$description))
+      }
     }
   }
 }
@@ -34,10 +38,11 @@ for(i in 1:999){ # alternativ: length(linje_list)
 alla_linjer <- rbind_pages(linje) ##!!will fail if some of the objects are lists instead of DFs,
                                   ##!!e.g. if "ersättningsbuss"
 
-colnames(alla_linjer) = c("linje", "hpl_id", "hpl_namn", "area", "lat", "long")
+colnames(alla_linjer) = c("linje", "linje_str", "hpl_id", "hpl_namn", "area", "lat", "long")
 
 ## exkludera linjer som är sjukresebuss eller färja ##!!update with new data columns
-LinjeExklud = c("990", "982", "984", "986", "988") 
+#LinjeExklud = c("990", "982", "984", "986", "988") 
+LinjeExklud = excluded_lines
 
 
 ## df med hållplats ID och respektive koordinater i WGS84
@@ -46,7 +51,7 @@ HplIdKoordinat = alla_linjer %>%
   dplyr::select(hpl_id, lat, long) %>% 
   arrange(hpl_id) %>%
   group_by(hpl_id) %>%
-  filter(row_number()==1) # unik hpl ID
+  distinct(hpl_id, .keep_all = TRUE) # unik hpl ID
   
 ## df med alla linjer som trafikera en hpl 
 AllaLinjerPerHplID = alla_linjer %>% 
@@ -57,8 +62,8 @@ AllaLinjerPerHplID = alla_linjer %>%
   dplyr::summarise(AllaLinjer = paste(linje, collapse = "_"))
 
 
-write.csv2(HplIdKoordinat, paste0("01_input_data/HplIdKoordinat_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
-write.csv2(AllaLinjerPerHplID, paste0("01_input_data/AllaLinjerPerHplID_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
+write.csv2(HplIdKoordinat, paste0("00_skript/data/interim/HplIdKoordinat_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
+write.csv2(AllaLinjerPerHplID, paste0("00_skript/data/interim/AllaLinjerPerHplID_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 
 
 
@@ -71,7 +76,7 @@ UnikKoordinat = HplIdKoordinat %>%
   ungroup() %>%
   dplyr::select(lat, long)
 
-UnikKoordinatKOPIA = UnikKoordinat
+#UnikKoordinatKOPIA = UnikKoordinat
 
 ## definera projection string
 SWEREF99TM = "+proj=utm +zone=33 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
@@ -79,13 +84,13 @@ SWEREF99TM = "+proj=utm +zone=33 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +n
 
 coordinates(UnikKoordinat) = ~long+lat 
 proj4string(UnikKoordinat) = CRS("+init=epsg:4326")
-UnikKoordinat_sweref <- as_data_frame(spTransform(UnikKoordinat, CRS(SWEREF99TM)))
+UnikKoordinat_sweref <- as.data.frame(spTransform(UnikKoordinat, CRS(SWEREF99TM)))
 
 # load shapefiles
 # SCG tätort shapefil är mer akkurat än landmäteriets, dvs det ingår bara ytan där det finns befolkning. 
 # Lantmäteriet använder en buffer. Dessutom följer 2018 befolkningsdata med i shapefilen
 
-kommun=readOGR("01_input_data/shp/ak_riks.shp", 
+kommun=readOGR("00_skript/data/input/shp/ak_riks.shp", 
                stringsAsFactors = FALSE, verbose = FALSE, encoding = "UTF-8")
 
 
@@ -103,7 +108,7 @@ kommun=readOGR("01_input_data/shp/ak_riks.shp",
 # tatort <- readOGR(paste0(td2, "/To2018_Swe99TM.shp"), stringsAsFactors = FALSE, verbose = FALSE, encoding = "UTF-8")
 # unlink(td)
 
-tatort <- readOGR(paste0(getwd(),"/01_input_data/shp/To2018_Swe99TM.shp"), stringsAsFactors = FALSE, verbose = FALSE, encoding = "UTF-8")
+tatort <- readOGR("00_skript/data/input/shp/To2018_Swe99TM.shp", stringsAsFactors = FALSE, verbose = FALSE, use_iconv = TRUE, encoding = "UTF-8")
 
 
 ## några av SCB tätorter är del av ULs stadstrafik och bör kategoriseras som Uppsala tätort
@@ -121,9 +126,9 @@ hpl_tatort <- data.frame(coordinates(UnikKoordinat_sweref),
 
 ##!! next chunk doesn't work, use bind_cols
 ## append files: alla hpl och all meta data
-hpl_meta = cbind(HplIdKoordinat, 
-                 hpl_kommun[c("long", "lat", "KOMMUNNAMN", "LANSNAMN")], 
-                 hpl_tatort[c("TATORTSKOD", "TATORT", "BEF")])
+#hpl_meta = cbind(HplIdKoordinat, 
+#                 hpl_kommun[c("long", "lat", "KOMMUNNAMN", "LANSNAMN")], 
+#                 hpl_tatort[c("TATORTSKOD", "TATORT", "BEF")])
 
 hpl_meta <- HplIdKoordinat %>%
   bind_cols(hpl_kommun[c("long", "lat", "KOMMUNNAMN", "LANSNAMN")]) %>%
@@ -136,27 +141,28 @@ colnames(hpl_meta) = c("HplID", "Hpl_Wgs84North", "Hpl_Wgs84East", "Hpl_SwerefEa
 ## Bålsta buss och tåg station ligger utanför tätorten och fick inget tätortnamn: raster::extract()
 hpl_meta = hpl_meta %>%
   as.data.frame() %>%
-  mutate(TatortNamn = if_else(HplID == "705003" | HplID == "105112", "Bålsta", TatortNamn),
+  mutate(TatortNamn = ifelse(HplID == "705003" | HplID == "105112", "Bålsta", TatortNamn),
          TatortKod = ifelse(HplID == "705003" | HplID == "105112", "T0520", TatortKod),
          Befolkning2018 = ifelse(HplID == "705003" | HplID == "105112", "15210", Befolkning2018))
 
-storregional = c("Stockholm", "Gävle", "Uppsala", "Västerås")
+storregional = storregionala_tatorter
 
 hpl_meta = hpl_meta %>% 
   mutate(HplID = as.character(hpl_meta$HplID),
          Befolkning2018 = as.numeric(Befolkning2018)) %>%
-  mutate(TatortTyp = ifelse(Befolkning2018 >= 50 &  Befolkning2018 < 200, "Småort",
-                            ifelse(Befolkning2018 >= 200 &  Befolkning2018 < 1000, "Mindre tätort",
-                                   ifelse(Befolkning2018 >= 1000 &  Befolkning2018 < 7000, "Medelstor tätort",
-                                          ifelse(Befolkning2018 >= 7000 & TatortNamn %notin% storregional, "Större tätort",
-                                                 ifelse(TatortNamn %in% storregional, "Storregional kärn", "XXX")))))) %>%
-  mutate(TatortTyp = ifelse(is.na(TatortTyp), "Utanför tätort", TatortTyp)) %>%
-  mutate(HplID = as.character(HplID))
+  mutate(TatortTyp = case_when(
+    Befolkning2018 >= 50 & Befolkning2018 < 200 ~ "Småort",
+    Befolkning2018 < 1000  ~ "Mindre tätort",
+    Befolkning2018 < 7000  ~ "Medelstor tätort",
+    Befolkning2018 >= 7000 & TatortNamn %notin% storregional  ~ "Större tätort",
+    TatortNamn %in% storregional  ~ "Storregional kärn",
+    TRUE ~ "Utanför tätort"
+  ))
 
 
 ## spara resultatfilen
 ## det krävs datum i filnamn eftersom API data reflekterar idags tidtabell
-write.csv2(hpl_meta, paste0("01_input_data/HplData_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
+write.csv2(hpl_meta, paste0("00_skript/data/interim/HplData_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 
 }
 
