@@ -110,13 +110,22 @@ extract_data_from_API_df <- function(api_df, data_to_extract, max_alternatives =
          )
 }
 
-alternatives = 3
 ptm <- proc.time()
 latest_row <- 1
 while(latest_row <= nrow(df2)){
   
     last_row <- min(nrow(df2), latest_row + 9)
-    x <- lapply(df2$url[latest_row:last_row], get_JSON_data_from_UL_API)
+    tryCatch(x <- lapply(df2$url[latest_row:last_row], get_JSON_data_from_UL_API),
+             warning = function(w) {},
+             error = function(e) {message("Fel med resor ", latest_row, " - ", last_row);
+               Start[latest_row:last_row] = rep(list(rep(0, times = alternatives)), latest_row + 9);
+               Stop[latest_row:last_row] = rep(list(rep(0, times = alternatives)), latest_row + 9);
+               StartHplID[latest_row:last_row] = rep(list(rep(0, times = alternatives)), latest_row + 9);
+               StopHplID[latest_row:last_row] = rep(list(rep(0, times = alternatives)), latest_row + 9);
+               StartTid[latest_row:last_row]  = rep(list(rep(0, times = alternatives)), latest_row + 9);
+               AnkomstTid[latest_row:last_row]  = rep(list(rep(0, times = alternatives)), latest_row + 9);
+               AntalBytePerResa[latest_row:last_row]  = rep(list(rep(0, times = alternatives)), latest_row + 9)}
+    )
     message("Hämtat resor ", latest_row, " - ", last_row)
     Start[latest_row:last_row] = lapply(x, extract_data_from_API_df, "from_name", alternatives)
     Stop[latest_row:last_row] = lapply(x, extract_data_from_API_df, "to_name", alternatives)
