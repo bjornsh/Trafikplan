@@ -1,0 +1,142 @@
+---
+title: "Utvärdering av Trafikförsörjningsprogram (TFP): grundutbud indikator 4.1"
+author: "Trafik och samhälle, Region Uppsala"
+date: '2020-06-11'
+output: html_document
+---
+
+
+```{r, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(sf)
+library(mapview)
+library(leaflet)
+library(DT)
+```
+
+
+
+```{r, message=FALSE, warning=FALSE, results = 'hide'}
+
+## ladda resultat filen
+# dat = sort(list.files("../02_output_data/", pattern = "resultat_pendling_starttatort*"), decreasing = TRUE)[1]
+dat = read.csv2(paste0("../02_output_data/Resultat_ind1.1-1.2-2.1-2.2-3.1-3.2_2020-09-01.csv"))
+
+tatort <- sf::st_read("../01_input_data/shp/To2018_Swe99TM.shp", options="UTF-8", quiet = TRUE)
+
+
+## byt CRS från Sweref90 TM till WGS84
+# st_crs(tatort)
+
+```
+
+```{r}
+x = dat %>% 
+  group_by("Huvud indikator" = substr(Indikator,1,1)) %>% 
+  summarise(Rusningstimmar = round(mean(Rusningstimmar),2),
+            Lågtrafiktimmar = round(mean(Lågtrafiktimmar),2)) 
+
+datatable(x, 
+          filter = "top",
+          options = list(pageLength = 100,
+                         columnDefs = list(list(className = 'dt-center', targets = 0:0))),
+          rownames= FALSE) %>%
+  formatStyle(names(x[,2:3]),
+              background = styleColorBar(c(0,range(x[,2:3])), 'lightblue'),
+              backgroundSize = '95% 50%',
+              backgroundRepeat = 'no-repeat',
+              backgroundPosition = 'right')
+
+```
+
+
+```{r}
+x = dat %>% 
+  group_by(Indikator) %>% 
+  summarise(Rusningstimmar = round(mean(Rusningstimmar),2),
+            Lågtrafiktimmar = round(mean(Lågtrafiktimmar),2)) 
+
+datatable(x, 
+          filter = "top",
+          options = list(pageLength = 100,
+                         columnDefs = list(list(className = 'dt-center', targets = 0:0))),
+          rownames= FALSE) %>%
+  formatStyle(names(x[,2:3]),
+              background = styleColorBar(c(0,range(x[,2:3])), 'lightblue'),
+              backgroundSize = '95% 50%',
+              backgroundRepeat = 'no-repeat',
+              backgroundPosition = 'right')
+
+```
+
+
+
+
+
+
+```{r}
+datatable(dat, 
+          filter = "top",
+          options = list(pageLength = 100)) %>% 
+  formatStyle(names(dat[,4:5]), 
+  background = styleColorBar(c(0,range(dat[,4:5])), 'lightblue'),
+  backgroundSize = '95% 50%',
+  backgroundRepeat = 'no-repeat',
+  backgroundPosition = 'right')
+
+```
+
+
+```{r}
+tatort_include = c("Stockholm", "Gävle", "Västerås")
+
+tatort_upps = tatort %>% 
+  filter(LANSKOD == "03" | TATORT %in% tatort_include) %>% 
+  st_transform(crs = 4326)
+  
+
+indik = "1.2"
+
+dat_start = dat %>% 
+  filter(Indikator == indik) %>% 
+  left_join(., tatort_upps[,c("TATORT", "geometry")], by = c("StartTatort" = "TATORT")) %>% 
+  rename(start_geometry = geometry) %>%
+  st_as_sf()
+
+dat_stop = dat %>% 
+  filter(Indikator == indik) %>% 
+  left_join(., tatort_upps[,c("TATORT", "geometry")], by = c("StopTatort" = "TATORT")) %>% 
+  rename(stop_geometry = geometry) %>% 
+  st_as_sf()
+
+
+
+pal <- colorBin(palette = "viridis", 
+                dat_stop$Lågtrafiktimmar, 
+                bins = c(0, .1, .2, .3, .4, .5, .75, .9, 1),
+                reverse = TRUE)
+
+leaflet(dat_stop) %>%
+  addProviderTiles("CartoDB.Positron") %>% 
+  addPolygons(fillColor = ~pal(Lågtrafiktimmar),
+              stroke = FALSE,
+              fillOpacity = 1, 
+              group = "stop",
+              popup = ~paste(paste0("Lågtrafiktimmar = ", round(100*Lågtrafiktimmar,0)),"%")) %>%   
+  addPolygons(data = dat_start,
+              stroke = FALSE,
+              fillColor = "black",
+              group = "start") %>%
+  addLegend(pal = pal,
+            values = ~Lågtrafiktimmar, 
+            group = "stop",
+            labFormat = labelFormat(suffix = "%", transform = function(x) 100 * x),
+            title = "Lågtrafiktimmar", position = "bottomright") %>% 
+  addLayersControl(overlayGroups = c("start","stop"),
+              options = layersControlOptions(collapsed = FALSE))
+```
+
+
+
+
