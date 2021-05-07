@@ -95,10 +95,18 @@ df2 <- df2 %>% filter(!is.na(StartHplID) & !is.na(StopHplID))
 
 
 get_JSON_data_from_UL_API <- function(url_api){
-    data = fromJSON(url_api)
+    tryCatch({
+      data = fromJSON(url_api)
+      },
+      error = function(e) {return(NA)}
+    )
 }
 
 extract_data_from_API_df <- function(api_df, data_to_extract, max_alternatives = 6){
+  if(is.na(api_df)){
+    rep(NA, times = max_alternatives)
+  }
+  else{
   switch(data_to_extract,
          "from_name" = api_df$from$name[1:max_alternatives],
          "to_name" = api_df$to$name[1:max_alternatives],
@@ -108,6 +116,7 @@ extract_data_from_API_df <- function(api_df, data_to_extract, max_alternatives =
          "arr_time" = api_df$arrivalDateTime[1:max_alternatives],
          "changes" = api_df$noOfChanges[1:max_alternatives]
          )
+  }
 }
 
 ptm <- proc.time()
@@ -115,17 +124,7 @@ latest_row <- 1
 while(latest_row <= nrow(df2)){
   
     last_row <- min(nrow(df2), latest_row + 9)
-    tryCatch(x <- lapply(df2$url[latest_row:last_row], get_JSON_data_from_UL_API),
-             warning = function(w) {},
-             error = function(e) {message("Fel med resor ", latest_row, " - ", last_row);
-               Start[latest_row:last_row] = rep(list(rep(0, times = alternatives)), latest_row + 9);
-               Stop[latest_row:last_row] = rep(list(rep(0, times = alternatives)), latest_row + 9);
-               StartHplID[latest_row:last_row] = rep(list(rep(0, times = alternatives)), latest_row + 9);
-               StopHplID[latest_row:last_row] = rep(list(rep(0, times = alternatives)), latest_row + 9);
-               StartTid[latest_row:last_row]  = rep(list(rep(0, times = alternatives)), latest_row + 9);
-               AnkomstTid[latest_row:last_row]  = rep(list(rep(0, times = alternatives)), latest_row + 9);
-               AntalBytePerResa[latest_row:last_row]  = rep(list(rep(0, times = alternatives)), latest_row + 9)}
-    )
+    x <- lapply(df2$url[latest_row:last_row], get_JSON_data_from_UL_API)
     message("Hämtat resor ", latest_row, " - ", last_row)
     Start[latest_row:last_row] = lapply(x, extract_data_from_API_df, "from_name", alternatives)
     Stop[latest_row:last_row] = lapply(x, extract_data_from_API_df, "to_name", alternatives)
@@ -144,13 +143,13 @@ fin = do.call(rbind, Map(data.frame,
                          Start=Start, Stop = Stop, StartHplID = StartHplID, StopHplID = StopHplID,
                          StartTid = StartTid, AnkomstTid = AnkomstTid, AntalBytePerResa = AntalBytePerResa))
 
-write.csv2(fin, "00_skript/data/output/fin.csv", row.names = F)
+write.csv2(fin, paste0("00_skript/data/output/API_data_", api_date, ".csv"), row.names = F)
 
 # ta bort duplikater 
 # om det inte finns tillräckligt många turer per timma (API försöker alltid att hitta 6 turer per resa) hittar APIn turer på en annan tid 
 # om man sen söker efter turer kl 06 hittar man samma turer och antal turer får inte adderas 
 fin1 = fin %>% distinct() 
-write.csv2(fin1, "00_skript/data/output/fin1.csv", row.names = F)
+write.csv2(fin1, paste0("00_skript/data/output/API_distinct_data_", api_date, ".csv"), row.names = F)
 
 
 # skapa nya variabler 

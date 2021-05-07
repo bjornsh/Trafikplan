@@ -31,11 +31,14 @@ required_packages_list <- c("httr",
                             "tidyr",
                             "stringr",
                             "lubridate",
-                            "rgeos")
+                            "rgeos",
+                            "spatialEco")
 
 required_scripts_list <- c("get_stop_and_line_data.R",
                            "create_api_input_dataframe.R",
-                           "get_api_data.R")
+                           "get_api_data.R",
+                           "get_indicator_pendling.R",
+                           "get_indicator_aktiviteter.R")
 
 for (pack in required_packages_list){
     if(pack %in% installed.packages() == FALSE){install.packages(pack)}
@@ -70,11 +73,24 @@ create_api_input_dataframe(desired_indicators)
 #Call 02_ul_api.r to call the API and get supply data to assess supply on the indicators.
 peak_hours <- c("06", "07", "08", "15", "16", "17", "18")
 off_peak_hours <- c("05", "09", "10", "11", "12", "13", "14", "19", "20", "21", "22", "23")
-alternatives_to_count = 3
-run_date = "2021-05-04"
+alternatives_to_count = 6
+run_date = "2021-05-10"
 
 get_api_data(peak_hours,
              off_peak_hours,
              TRUE,
              alternatives_to_count,
              run_date)
+
+get_indicator_pendling(alternatives_to_count,
+                       run_date)
+
+get_indicator_aktiviteter(alternatives_to_count,
+                          run_date,
+                          run_date, #vardag
+                          run_date) #helg
+
+get_indicator_skolor(alternatives_to_count,
+                          run_date,
+                          run_date, #vardag
+                          run_date) #helg
