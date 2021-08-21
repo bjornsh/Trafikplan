@@ -38,7 +38,8 @@ required_scripts_list <- c("get_stop_and_line_data.R",
                            "create_api_input_dataframe.R",
                            "get_api_data.R",
                            "get_indicator_pendling.R",
-                           "get_indicator_aktiviteter.R")
+                           "get_indicator_aktiviteter.R",
+                           "get_indicator_skolor.R")
 
 for (pack in required_packages_list){
     if(pack %in% installed.packages() == FALSE){install.packages(pack)}
@@ -52,14 +53,19 @@ APIkey_GTFS_regional_static_data <- "ed1a746e1a454d7a99aab00f2b64f581"
 
 
 #Call 00_hpl_data_API.r to get all lines and stops and connect them to municipalities and tätorter.
-vector_lines_excluded <-  c("990", "982", "984", "986", "988")
+vector_lines_excluded <-  c()
+vector_types_excluded <- c(5)
+#PT Types: 1 - Uppsala stad, 2 - tätortstrafik, 3 - Expressbussar, 4 - SL bussar,
+# 5 - färja, 6 - interregionala bussar, 7 - Uppsala stad linjer 30-32, 8 - SL pendeln, 9 - Upptåget,
+# 11 - skoltrafik och förstärkningstrafik
 storreg_tat <- c("Stockholm", "Gävle", "Uppsala", "Västerås")
-get_stop_and_line_data(vector_lines_excluded, 
-                       storreg_tat)
+get_stop_and_line_data(vector_lines_excluded, #lines to exclude from API call (ersättningsbuss is excluded by default)
+                       vector_types_excluded, #PT types to exclude from list
+                       storreg_tat) #vector of storregionala tätorter, used in categorising stops according to population
 
 
 #Call 01_skapa_ramverk.r to create the data-frame for the API call based on the desired indicators.
-desired_indicators = c(
+desired_indicators = c( #do not include 4.1 and 4.2 here, this is only for indicators 1-3
     "1.1",
     "1.2",
     "2.1",
@@ -71,16 +77,23 @@ create_api_input_dataframe(desired_indicators)
 
 
 #Call 02_ul_api.r to call the API and get supply data to assess supply on the indicators.
+#Argument definitions are given HERE and the variables are used in the function calls below.
+#Functions have default arguments in case some argument is skipped, but standard use is to define all the arguments here and
+#call the functions below with all the arguments defined.
 peak_hours <- c("06", "07", "08", "15", "16", "17", "18")
 off_peak_hours <- c("05", "09", "10", "11", "12", "13", "14", "19", "20", "21", "22", "23")
+existing_api_file_name <- "api_data_backup.RData" #use saved api-data from previous runs
+#The saved data must be a .RData file with the vectors Start, Stop, StartHplID, StopHplID, StartTid, AnkomstTid, AntalBytePerResa
+#The .RData file must be in the input folder.
 alternatives_to_count = 6
-run_date = "2021-05-10"
+run_date = "2021-05-17"
 
 get_api_data(peak_hours,
              off_peak_hours,
-             TRUE,
+             existing_api_file_name,
+             FALSE,
              alternatives_to_count,
-             run_date)
+             run_date) #used for api run date and file naming
 
 get_indicator_pendling(alternatives_to_count,
                        run_date)

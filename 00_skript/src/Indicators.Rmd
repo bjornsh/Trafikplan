@@ -20,9 +20,9 @@ library(DT)
 ```{r, message=FALSE, warning=FALSE, results = 'hide'}
 ## ladda resultat filen
 # dat = sort(list.files("../02_output_data/", pattern = "resultat_pendling_starttatort*"), decreasing = TRUE)[1]
-dat = read.csv2(paste0("00_skript/data/output/Resultat_2021-05-07.csv"))
-tatort <- sf::st_read("00_skript/data/input/shp/To2018_Swe99TM.shp", options="UTF-8", quiet = TRUE)
-## byt CRS från Sweref90 TM till WGS84
+dat = read.csv2(paste0(getwd(), "/00_skript/data/output/Resultat_2021-05-11.csv"))
+tatort <- sf::st_read(paste0(getwd(), "/00_skript/data/input/shp/To2018_Swe99TM.shp"), options="UTF-8", quiet = TRUE)
+## byt CRS fran Sweref90 TM till WGS84
 # st_crs(tatort)
 ```
 
@@ -48,7 +48,7 @@ datatable(x,
 x = dat %>% 
     group_by(Indikator) %>% 
     summarise(Rusningstimmar = round(mean(Rusningstimmar),2),
-              Lågtrafiktimmar = round(mean(Lågtrafiktimmar),2)) 
+              Lagtrafiktimmar = round(mean(Lagtrafiktimmar),2)) 
 datatable(x, 
           filter = "top",
           options = list(pageLength = 100,
@@ -79,7 +79,7 @@ datatable(dat,
 
 
 ```{r}
-tatort_include = c("Stockholm", "Gävle", "Västerås")
+tatort_include = c("Stockholm", "Gävle", "Västeras")
 tatort_upps = tatort %>% 
     filter(LANSKOD == "03" | TATORT %in% tatort_include) %>% 
     st_transform(crs = 4326)
@@ -105,7 +105,7 @@ leaflet(dat_stop) %>%
                 stroke = FALSE,
                 fillOpacity = 1, 
                 group = "stop",
-                popup = ~paste(paste0("Lågtrafiktimmar = ", round(100*Lagtrafiktimmar,0)),"%")) %>%   
+                popup = ~paste(paste0("Lagtrafiktimmar = ", round(100*Lagtrafiktimmar,0)),"%")) %>%   
     addPolygons(data = dat_start,
                 stroke = FALSE,
                 fillColor = "black",
@@ -114,7 +114,7 @@ leaflet(dat_stop) %>%
               values = ~Lagtrafiktimmar, 
               group = "stop",
               labFormat = labelFormat(suffix = "%", transform = function(x) 100 * x),
-              title = "Lågtrafiktimmar", position = "bottomright") %>% 
+              title = "Lagtrafiktimmar", position = "bottomright") %>% 
     addLayersControl(overlayGroups = c("start","stop"),
                      options = layersControlOptions(collapsed = FALSE))
 ```

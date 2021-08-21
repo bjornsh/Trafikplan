@@ -2,8 +2,8 @@ get_indicator_pendling <- function(
   #vector_peak_hrs = c("06", "07", "08", "15", "16", "17", "18"),
   #vector_off_peak_hrs = c("05", "09", "10", "11", "12", "13", "14", "19", "20", "21", "22", "23"),
   #test_run = FALSE,
-  alternatives = 6,
-  api_date = today()
+  alternatives = 6, #default value. Will be overwritten by main.R arguments
+  api_date = today() #default value. Will be overwritten by main.R arguments
 )
   {
 

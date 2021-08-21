@@ -5,7 +5,7 @@ get_indicator_skolor <- function(
   alternatives = 6,
   hpl_file_date = today(),
   api_date_vd = today(),
-  api_data_h = today()
+  api_date_h = today()
 )
 {
 

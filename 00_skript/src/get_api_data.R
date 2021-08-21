@@ -1,5 +1,6 @@
 get_api_data <- function(vector_peak_hrs = c("06", "07", "08", "15", "16", "17", "18"),
                          vector_off_peak_hrs = c("05", "09", "10", "11", "12", "13", "14", "19", "20", "21", "22", "23"),
+                         existing_api_data = NA,
                          test_run = FALSE,
                          alternatives = 6,
                          api_date = today()){
@@ -21,6 +22,9 @@ plan = read.csv2("00_skript/data/interim/AnalysPlanInputForAPI.csv")
 rusning = vector_peak_hrs
 #ejrusning = c("05", "09", "10", "11", "12", "13", "14", "19", "20", "21", "22", "23")
 ejrusning = vector_off_peak_hrs
+
+#If reading data from existing file, no API call
+if(is.na(existing_api_data)){
 
 # test run, ta bort för full körning
 if(test_run){
@@ -123,7 +127,7 @@ ptm <- proc.time()
 latest_row <- 1
 while(latest_row <= nrow(df2)){
   
-    last_row <- min(nrow(df2), latest_row + 9)
+    last_row <- min(nrow(df2), latest_row + 99)
     x <- lapply(df2$url[latest_row:last_row], get_JSON_data_from_UL_API)
     message("Hämtat resor ", latest_row, " - ", last_row)
     Start[latest_row:last_row] = lapply(x, extract_data_from_API_df, "from_name", alternatives)
@@ -138,6 +142,11 @@ while(latest_row <= nrow(df2)){
 }
 proc.time() - ptm
 
+}
+else{
+  load(paste0("00_skript/data/output/", existing_api_data)) #load previously saved data
+}
+
 ##### slå ihopp allt i en df
 fin = do.call(rbind, Map(data.frame, 
                          Start=Start, Stop = Stop, StartHplID = StartHplID, StopHplID = StopHplID,
@@ -148,13 +157,13 @@ write.csv2(fin, paste0("00_skript/data/output/API_data_", api_date, ".csv"), row
 # ta bort duplikater 
 # om det inte finns tillräckligt många turer per timma (API försöker alltid att hitta 6 turer per resa) hittar APIn turer på en annan tid 
 # om man sen söker efter turer kl 06 hittar man samma turer och antal turer får inte adderas 
-fin1 = fin %>% distinct() 
-write.csv2(fin1, paste0("00_skript/data/output/API_distinct_data_", api_date, ".csv"), row.names = F)
+fin = fin %>% distinct() 
+write.csv2(fin, paste0("00_skript/data/output/API_distinct_data_", api_date, ".csv"), row.names = F)
 
 
 # skapa nya variabler 
 # APIs svar är i UTC -> byta från UTC till lokal tid
-fin2 = fin1 %>%
+fin = fin %>%
   filter(substr(StartTid, 1, 10) == date) %>% # filtrera bort alla rader med datum som är INTE datum som används i sökningen
   mutate(StartTid = as.POSIXct(paste(substr(StartTid, 1, 10), substr(StartTid, 12, 19), sep = " "), tz="UTC"),
          AnkomstTid = as.POSIXct(paste(substr(AnkomstTid, 1, 10), substr(AnkomstTid, 12, 19), sep = " "), tz="UTC"),
@@ -165,14 +174,14 @@ fin2 = fin1 %>%
          StartStop = paste0(Start, "_", Stop)) %>% 
   dplyr::select(-StartTid, -AnkomstTid)
 
-write.csv2(fin2, "00_skript/data/output/fin2.csv", row.names = F)
+write.csv2(fin, "00_skript/data/output/fin2.csv", row.names = F)
 
 # identifiera första och sista dygnstimma som ingår i data
-FirstHr = sort(fin2$DygnsTimma)[1]
-LastHr = sort(fin2$DygnsTimma)[length(fin2$DygnsTimma)]
+FirstHr = sort(fin$DygnsTimma)[1]
+LastHr = sort(fin$DygnsTimma)[length(fin$DygnsTimma)]
 
 
-AntalTurerPerBytePerDygnsTimma = fin2 %>% 
+AntalTurerPerBytePerDygnsTimma = fin %>% 
   count(StartStop, StartHplID, StopHplID, AntalBytePerResa, DygnsTimma) %>%
   spread(DygnsTimma, n, fill = 0) %>%
   gather(DygnsTimma, AntalTurer, all_of(FirstHr):all_of(LastHr)) %>%
@@ -182,13 +191,8 @@ AntalTurerPerBytePerDygnsTimma = fin2 %>%
   filter(!is.na(TimmaTyp))
 
 
-# när "plan" är redo med lägg till  
-  # left_join(., plan[,c("StartHplID", "StopHplID", "AntalTurerPerRusningTimma", "AntalTurerPerEjRusningTimma")],
-  #           by = c("StartHplID" = "StartHplID", "StopHplID" = "StopHplID")) %>%
-  #    filter AntalBytePerResa > AntalTurerPerRusningT, ta bort
 
-
-fin3 = fin2 %>% 
+fin = fin %>% 
   count(StartStop, StartHplID, StopHplID, AntalBytePerResa, DygnsTimma) %>%
   spread(DygnsTimma, n, fill=0) %>%
   gather(DygnsTimma, AntalTurer, all_of(FirstHr):all_of(LastHr)) %>%
@@ -198,16 +202,16 @@ fin3 = fin2 %>%
   filter(!is.na(TimmaTyp)) %>%
   left_join(., plan[,c("StartHplID", "StopHplID", "AntalTurerPerRusningTimma", "AntalTurerPerEjRusningTimma", "MaxAntalByte")],
             by = c("StartHplID" = "StartHplID", "StopHplID" = "StopHplID")) %>%
-  filter(AntalBytePerResa <= 1) %>%
-#  filter(AntalBytePerResa <= MaxAntalByte) %>% # use when input table has data for MaxAntalByte
+  mutate(MaxAntalByte = ifelse(is.na(MaxAntalByte), 1, MaxAntalByte)) %>%
+  filter(AntalBytePerResa <= MaxAntalByte) %>%
   group_by(StartStop, StartHplID, StopHplID, TimmaTyp, DygnsTimma) %>%
   summarise(SummaAntalTurer = sum(AntalTurer)) %>%
   ungroup() %>%
   left_join(., plan[,c("StartHplID", "StopHplID", "AntalTurerPerRusningTimma", "AntalTurerPerEjRusningTimma")],
             by = c("StartHplID" = "StartHplID", "StopHplID" = "StopHplID")) %>%
   mutate(AntalTurer = as.numeric(SummaAntalTurer)) %>%
-  mutate(TillrackligAntalTurer = ifelse((TimmaTyp == "rusning" & AntalTurer >= 2) |
-                                          (TimmaTyp == "ejrusning" & AntalTurer >= 1), "Ja", "Nej"))
+  mutate(TillrackligAntalTurer = ifelse((TimmaTyp == "rusning" & AntalTurer >= AntalTurerPerRusningTimma) |
+                                          (TimmaTyp == "ejrusning" & AntalTurer >= AntalTurerPerEjRusningTimma), "Ja", "Nej"))
   
 
 #### Slutresultat #####
@@ -215,7 +219,7 @@ fin3 = fin2 %>%
 # länk PLAN kolumns för att identifier vilka tätorter det handlar om 
 ### DET GÅR INTE ATT ADDERA ANTAL RESOR PER STARTTATORT OCH STOPTATORT KOMBINATION - hpl kan ligga på samma resa och därmed är det dubbelräkning
 ### DET MÅSTE VARA MAX ANTALTURER
-fin4 = fin3 %>% 
+fin = fin %>% 
   left_join(., StartTatort, by = "StartHplID") %>%
   left_join(., StopTatort, by = "StopHplID")
 
@@ -223,10 +227,11 @@ fin4 = fin3 %>%
 # här används max antal turer per timma reserelation, dvs om det finns 3 hpl i tätort X och 2 i tätort Y, finns det sex reserelationer för tätort X-Y
 # för varje reserelation får man antal turer per timma. Här används max som filtrerar den högsta per timma ---- är det en bra strategi???????????
 
-fin5 = fin4 %>%
-  group_by(StartTatort, StopTatort, TimmaTyp, DygnsTimma) %>%
+fin = fin %>%
+  group_by(StartTatort, StopTatort, TimmaTyp, DygnsTimma, AntalTurerPerRusningTimma, AntalTurerPerEjRusningTimma) %>%
   summarise(MaxAntalTurerPerTimmaPerTatortTatort = max(AntalTurer)) %>%  
-  mutate(TillrackligAntalTurer = ifelse(MaxAntalTurerPerTimmaPerTatortTatort >=2, "Ja", "Nej")) %>%
+  mutate(TillrackligAntalTurer = ifelse((TimmaTyp == "rusning" & MaxAntalTurerPerTimmaPerTatortTatort >= AntalTurerPerRusningTimma) |
+                                          (TimmaTyp == "ejrusning" & MaxAntalTurerPerTimmaPerTatortTatort >= AntalTurerPerEjRusningTimma), "Ja", "Nej")) %>%
   group_by(StartTatort, StopTatort, TimmaTyp, TillrackligAntalTurer) %>%
   summarise(AntalTimma = n()) %>%
   spread(TillrackligAntalTurer, AntalTimma, fill = 0) %>%
@@ -234,18 +239,16 @@ fin5 = fin4 %>%
   dplyr::select(-Ja, -Nej) %>%
   spread(TimmaTyp, AndelTimmarMedTillrackligTurer)
 
-# print(fin5, n = Inf)
 
-fin6 = plan %>% 
+fin = plan %>% 
   dplyr::select(Indikator, StartTatort, StopTatort) %>%
   distinct() %>%
-  right_join(., fin5, by = c("StartTatort", "StopTatort")) %>%
+  right_join(., fin, by = c("StartTatort", "StopTatort")) %>%
   arrange(Indikator) %>%
   dplyr::select(Indikator, StartTatort, StopTatort, Rusningstimmar = rusning, Lagtrafiktimmar = ejrusning) %>%
   mutate(Rusningstimmar = round(Rusningstimmar, 2), 
          Lagtrafiktimmar = round(Lagtrafiktimmar, 2))
   
-# print(fin6, n = Inf)
 
-write.csv2(fin6, paste0("00_skript/data/output/Resultat_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
+write.csv2(fin, paste0("00_skript/data/output/Resultat_", substr(Sys.time(), 1, 10), ".csv"), row.names = F)
 }

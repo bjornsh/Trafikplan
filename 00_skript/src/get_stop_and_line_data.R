@@ -1,4 +1,4 @@
-get_stop_and_line_data <- function(excluded_lines, storregionala_tatorter){
+get_stop_and_line_data <- function(excluded_lines, excluded_types, storregionala_tatorter){
   
 #---------------------------------------------------------------------------------------------------
 # Syfte
@@ -24,7 +24,7 @@ for(i in 1:999){ # alternativ: length(linje_list)
   
     if (!is.null(ul)){
       if (ul$name != "Ersättningsbuss"){
-        linje <- append(linje, list(cbind(ul$lineNo, ul$name, ul$pointsOnRoute)))
+        linje <- append(linje, list(cbind(ul$lineNo, ul$name, ul$description, ul$pointsOnRoute, ul$trafficType)))
       }
       else{
         print(paste0("Linje ", ul$lineNo, " är en Ersättningsbuss och har exkluderats.
@@ -38,16 +38,17 @@ for(i in 1:999){ # alternativ: length(linje_list)
 alla_linjer <- rbind_pages(linje) ##!!will fail if some of the objects are lists instead of DFs,
                                   ##!!e.g. if "ersättningsbuss"
 
-colnames(alla_linjer) = c("linje", "linje_str", "hpl_id", "hpl_namn", "area", "lat", "long")
+colnames(alla_linjer) = c("linje", "linje_str", "linje_desk", "hpl_id", "hpl_namn", "area", "lat", "long", "koll_typ")
 
 ## exkludera linjer som är sjukresebuss eller färja ##!!update with new data columns
 #LinjeExklud = c("990", "982", "984", "986", "988") 
 LinjeExklud = excluded_lines
+TypExklud = excluded_types
 
 
 ## df med hållplats ID och respektive koordinater i WGS84
 HplIdKoordinat = alla_linjer %>% 
-  filter(linje %notin% LinjeExklud) %>%
+  filter(linje %notin% LinjeExklud & koll_typ %notin% TypExklud) %>%
   dplyr::select(hpl_id, lat, long) %>% 
   arrange(hpl_id) %>%
   group_by(hpl_id) %>%
@@ -55,6 +56,7 @@ HplIdKoordinat = alla_linjer %>%
   
 ## df med alla linjer som trafikera en hpl 
 AllaLinjerPerHplID = alla_linjer %>% 
+  filter(linje %notin% LinjeExklud & koll_typ %notin% TypExklud) %>%
   dplyr::select(linje, hpl_id) %>% 
   mutate(hpl_id = as.character(hpl_id)) %>%
   distinct() %>% # tex linje 2 har hpl 700600 två gånger
